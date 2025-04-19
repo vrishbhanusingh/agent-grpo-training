@@ -1,0 +1,2 @@
+# This file will store all agent interaction logs in JSONL format.
+# Each line is a JSON object as described in agent-thinking.txt section 11.

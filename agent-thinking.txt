@@ -1,0 +1,323 @@
+# Agentic Workflow with GRPO Training: Detailed Implementation Plan
+
+# === Agentic Workflow Diagrams ===
+
+## High-Level Agentic Workflow (Mermaid)
+
+```mermaid
+flowchart TD
+    subgraph Message_Bus[Message Bus (RabbitMQ)]
+        direction TB
+        TaskQ[Task Queue]
+        ResponseQ[Response Queue]
+        RewardQ[Reward Queue]
+    end
+
+    UserInput[User/Input Source] -->|Task| TaskQ
+    TaskQ -->|Task| SmallModelAgent[Small Model Agent]
+    SmallModelAgent -->|Response| ResponseQ
+    ResponseQ -->|Response| ScoringAgent[Scoring Agent (Big Model)]
+    ScoringAgent -->|Reward| RewardQ
+    RewardQ -->|Reward| SmallModelAgent
+    SmallModelAgent -->|Log| LogFile[Logs/agent_interactions.jsonl]
+    ScoringAgent -->|Log| LogFile
+    Orchestrator[Orchestrator/Controller] -- Coordinates --> TaskQ
+    Orchestrator -- Monitors --> ResponseQ
+    Orchestrator -- Monitors --> RewardQ
+    Orchestrator -- Logs --> LogFile
+    LogFile -->|Training Data| Trainer[Trainer Service]
+    Trainer -->|New Adapter| AdapterRegistry[Adapter Registry]
+    AdapterRegistry --> Orchestrator
+```
+
+---
+
+## Detailed Agent Interaction & Scoring (Mermaid)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Orchestrator
+    participant SmallModelAgent
+    participant MessageBus
+    participant ScoringAgent
+    participant Trainer
+
+    User->>Orchestrator: Submit Task
+    Orchestrator->>MessageBus: Publish Task (Task Queue)
+    MessageBus->>SmallModelAgent: Deliver Task
+    SmallModelAgent->>MessageBus: Publish Response (Response Queue)
+    MessageBus->>ScoringAgent: Deliver Response
+    ScoringAgent->>MessageBus: Publish Reward (Reward Queue)
+    MessageBus->>SmallModelAgent: Deliver Reward
+    SmallModelAgent->>Orchestrator: Log Interaction
+    ScoringAgent->>Orchestrator: Log Score
+    Orchestrator->>Trainer: Provide Logs for Training
+    Trainer->>Orchestrator: Notify New Adapter Version
+```
+
+These diagrams visually represent the agentic workflow and message flow described in this implementation plan. They can be used in documentation and as a reference for implementation.
+
+## 1. Problem Statement
+Design a scalable agentic workflow where multiple agents (MCP servers) communicate via message queues. Each response from a small model agent is scored by a more intelligent big model agent, and the small model is trained using GRPO (Generalized Reinforce Policy Optimization) to maximize the score. The system must be orchestrated on Kubernetes using Pulumi for infrastructure-as-code.
+
+## 2. High-Level Architecture
+- **Agents:** Each agent is a microservice (MCP server) running in its own container.
+- **Message Queue:** Centralized broker (RabbitMQ/Kafka) for agent communication.
+- **Scoring Agent:** Large model agent that evaluates responses and provides reward signals.
+- **Small Model Agent:** Learns via GRPO, updates policy based on rewards.
+- **Orchestrator/Controller:** Coordinates the workflow and message routing.
+- **Kubernetes Cluster:** All components run as pods/services, managed by Pulumi.
+
+## 3. Detailed Steps and Considerations
+
+### 3.1. Define Agent APIs and Message Formats
+- Specify REST/gRPC endpoints for inference, scoring, and training.
+- Define message schemas (JSON/protobuf) for requests, responses, and rewards.
+- Consider versioning and extensibility of message formats.
+
+### 3.2. Implement Small Model Agent
+- Build a microservice exposing endpoints for inference and training.
+- Integrate GRPO training loop: receive input, generate response, receive reward, update policy.
+- Ensure statelessness or use external storage for model checkpoints.
+
+### 3.3. Implement Scoring Agent (Big Model)
+- Build a microservice that receives responses, evaluates them, and returns a score/reward.
+- Optionally, log responses and scores for analysis.
+- Consider batching for efficiency if needed.
+
+### 3.4. Set Up Message Broker
+- Choose RabbitMQ or Kafka for message passing.
+- Define queues/topics for task, response, and reward messages.
+- Ensure reliable delivery and fault tolerance.
+
+### 3.5. Orchestrator/Controller Logic
+- Manage the workflow: send tasks, collect responses, route to scoring agent, deliver rewards.
+- Optionally, implement as a separate service or as part of the agents.
+- Handle retries, failures, and logging.
+
+### 3.6. Containerization
+- Write Dockerfiles for each agent and the message broker (if not using managed service).
+- Ensure minimal, secure images with required dependencies.
+
+### 3.7. Pulumi Infrastructure-as-Code
+- Define Kubernetes resources:
+  - Namespaces for isolation
+  - Deployments for each agent
+  - StatefulSet/Deployment for message broker
+  - Services for inter-agent communication
+  - ConfigMaps/Secrets for configuration
+  - Autoscaling policies
+- Automate deployment, updates, and rollbacks.
+
+### 3.8. Scalability and Fault Tolerance
+- Use Kubernetes autoscaling for agents and broker.
+- Design agents to be stateless or use persistent storage.
+- Monitor queue lengths and agent health.
+
+### 3.9. Monitoring and Logging
+- Integrate Prometheus/Grafana for metrics.
+- Use ELK stack or similar for logs.
+- Track training progress, agent performance, and system health.
+
+### 3.10. CI/CD Pipeline
+- Automate build, test, and deployment of agent containers.
+- Integrate with Pulumi for infrastructure updates.
+
+### 3.11. Extensibility
+- Allow easy addition of new agent types or scoring strategies.
+- Support swapping models or training algorithms.
+- Enable integration with external data sources or UIs.
+
+## 4. Open Questions and Next Steps
+- Which message broker to use (RabbitMQ vs Kafka)?
+- What ML frameworks for small/big models?
+- How to persist and version model checkpoints?
+- How to handle agent failures and retries?
+- What metrics are most important to monitor?
+
+## 5. Next Actions
+- Finalize technology choices (broker, ML frameworks, etc).
+- Draft API/message schemas.
+- Prototype agent communication locally.
+- Write initial Pulumi scripts for cluster setup.
+- Iterate and refine based on testing.
+
+## 6. Concrete Implementation Choices (April 19, 2025)
+
+### 6.1. Message Queue
+- Use RabbitMQ as the central broker for all agent communication.
+- Define queues for: tasks (input to small model agent), responses (output from small model agent), rewards (output from scoring agent).
+- Use JSON as the message schema for interoperability.
+
+### 6.2. Agents as MCP Servers
+- Each agent (small model agent, scoring agent, orchestrator/controller) runs as an MCP server.
+- Each MCP server is containerized with its own Dockerfile.
+- Agents subscribe/publish to RabbitMQ queues as needed.
+
+### 6.3. LLM Choice
+- Use a small Llama model (e.g., Llama-2-7B or smaller) for the small model agent.
+- Containerize the Llama model for both inference and online GRPO training.
+- The scoring agent can use a larger LLM or a more advanced evaluation model, also containerized.
+
+### 6.4. Communication and Message Flow
+- All communication between agents happens via RabbitMQ queues.
+- Standardize message formats (JSON) for tasks, responses, and rewards.
+- Document the message schema for each queue.
+
+### 6.5. Containerization
+- Each component (RabbitMQ, small model agent, scoring agent, orchestrator) has its own Dockerfile.
+- Use docker-compose for local development/testing.
+- Ensure all containers expose necessary ports and health checks.
+
+### 6.6. Kubernetes and Pulumi
+- Deploy all containers as Kubernetes pods/services.
+- Use Pulumi scripts to define deployments, services, config, and autoscaling.
+- Ensure RabbitMQ is deployed as a StatefulSet or Deployment with persistent storage.
+
+### 6.7. Next Steps
+- Draft message schemas for all queues.
+- Write Dockerfiles for each agent and RabbitMQ.
+- Prototype local communication using docker-compose.
+- Prepare Pulumi scripts for Kubernetes deployment.
+- Document all design decisions and update this file as implementation progresses.
+
+## 7. Implementation Metadata and Environment Notes (April 19, 2025)
+
+- User is working in a WSL (Windows Subsystem for Linux) environment.
+- Simplicity is prioritized for initial prototyping.
+- All containers and scripts should be compatible with Linux/WSL.
+- Log all major decisions, environment constraints, and implementation steps in this file.
+- Use relative paths and avoid hardcoding OS-specific details.
+- Prefer docker-compose for local orchestration before moving to Kubernetes.
+- Document any WSL-specific issues or workarounds encountered during development.
+
+## 8. Next Step: Draft Message Schemas
+- Define simple JSON message schemas for:
+  - Task (input to small model agent)
+  - Response (output from small model agent)
+  - Reward (output from scoring agent)
+- Keep schemas minimal for now, but allow for future extensibility (e.g., add metadata fields).
+- Log the draft schemas in this file before implementation.
+
+## 9. Draft Message Schemas (Initial Version)
+
+### 9.1. Task Message (to Small Model Agent)
+{
+  "task_id": "string",           // Unique identifier for the task
+  "input": "string",             // Input prompt or data for the agent
+  "metadata": {                   // Optional metadata (extensible)
+    "timestamp": "string",
+    "source": "string"
+  }
+}
+
+### 9.2. Response Message (from Small Model Agent)
+{
+  "task_id": "string",           // Corresponds to the original task
+  "response": "string",          // Agent's generated output
+  "agent_id": "string",          // Identifier for the responding agent
+  "metadata": {                   // Optional metadata
+    "timestamp": "string"
+  }
+}
+
+### 9.3. Reward Message (from Scoring Agent)
+{
+  "task_id": "string",           // Corresponds to the original task
+  "score": "float",              // Reward/score assigned by the scoring agent
+  "scoring_agent_id": "string",  // Identifier for the scoring agent
+  "metadata": {                   // Optional metadata
+    "timestamp": "string",
+    "criteria": "string"         // Description of scoring criteria
+  }
+}
+
+// These schemas are intentionally minimal for initial prototyping and can be extended as needed.
+
+## 10. Plan for Decoupled Training and Adapter Management (April 19, 2025)
+
+### 10.1. Decoupled Trainer Design
+- The trainer is a separate service, not part of the main agentic workflow.
+- The main workflow (agents, orchestrator, scoring agent) continues to operate and collect data (internal messages, responses, scores).
+- All relevant communication and scores are logged to a persistent storage (e.g., database, object storage, or flat files).
+
+### 10.2. Data Collection
+- Define a logging mechanism in each agent and the orchestrator to capture:
+  - Task input
+  - Agent responses
+  - Associated scores/rewards
+  - Timestamps, agent IDs, and other metadata
+- Store this data in a structured format suitable for training (e.g., JSONL, Parquet, or a database table).
+- Periodically (or on-demand), the trainer service reads this data for training.
+
+### 10.3. Training Process
+- The trainer service loads the collected data and performs GRPO training to produce a new Llama adapter for each submodel (small model agent).
+- Training is done offline, decoupled from the main workflow.
+- After training, the new adapter is saved and versioned.
+
+### 10.4. Adapter Deployment and A/B Testing
+- The new adapter is deployed to a subset of agent instances (A/B test group), while the rest use the current primary adapter (control group).
+- The orchestrator tags tasks/responses to track which adapter was used.
+- Collect performance metrics (e.g., average score, task success rate) for both groups.
+- If the new adapter outperforms the primary adapter, promote it to be the new primary.
+- Rollback if the new adapter underperforms.
+
+### 10.5. Versioning and Rollback
+- Maintain a registry of adapter versions and their performance metrics.
+- Automate promotion/rollback based on A/B test results.
+- Log all adapter changes and decisions in this file.
+
+### 10.6. Next Steps
+- Define the data schema for logging communication and scores.
+- Design the trainer service interface and workflow.
+- Plan the adapter deployment and A/B testing mechanism.
+- Document all design decisions and update this file as implementation progresses.
+
+## 11. Data Schema for Logging Communication and Scores (Initial Version)
+
+- Store logs as JSONL (one JSON object per line) for simplicity and easy parsing.
+- Each log entry contains:
+  - task_id: string
+  - input: string (task input)
+  - response: string (agent output)
+  - score: float (reward from scoring agent)
+  - agent_id: string (which agent/submodel produced the response)
+  - adapter_version: string (which adapter was used)
+  - timestamp: string (ISO format)
+  - metadata: object (optional, extensible)
+
+Example log entry:
+{
+  "task_id": "abc123",
+  "input": "What is the capital of France?",
+  "response": "Paris",
+  "score": 0.95,
+  "agent_id": "small_model_1",
+  "adapter_version": "v1.0.0",
+  "timestamp": "2025-04-19T12:34:56Z",
+  "metadata": {"source": "test", "criteria": "accuracy"}
+}
+
+- All agents and the orchestrator append to a shared log file (e.g., logs/agent_interactions.jsonl).
+- The trainer service reads this file for offline GRPO training.
+
+## 12. Trainer Service Interface and Workflow (Initial Version)
+
+- Trainer runs as a separate script/service.
+- Reads logs/agent_interactions.jsonl and filters data for each submodel/adapter.
+- Performs GRPO training using the collected data.
+- Saves new adapter checkpoints (e.g., adapters/small_model_1/v1.0.1/).
+- Updates a registry file (adapters/adapter_registry.json) with version and performance info.
+- Notifies orchestrator (e.g., via file update or message) when a new adapter is ready for A/B testing.
+
+## 13. Adapter Deployment and A/B Testing (Initial Version)
+
+- Orchestrator assigns a portion of tasks to agents using the new adapter (A/B group), rest use primary adapter (control group).
+- Tracks which adapter was used for each response in the log.
+- After a test period, compares average scores for A/B and control groups.
+- If new adapter outperforms, orchestrator promotes it to primary in adapter_registry.json.
+- If not, rolls back to previous adapter.
+
+---
+These steps are intentionally simple for initial testing and can be iteratively improved.

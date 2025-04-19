@@ -1,0 +1,7 @@
+{
+  "small_model_1": {
+    "primary": "v1.0.0",
+    "candidates": []
+  }
+}
+# This registry tracks which adapter version is primary and which are candidates for A/B testing.
