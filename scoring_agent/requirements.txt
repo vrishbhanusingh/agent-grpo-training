@@ -1,0 +1,2 @@
+pika
+# Add ML framework and other dependencies as needed

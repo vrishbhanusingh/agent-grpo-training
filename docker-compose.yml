@@ -1,0 +1,63 @@
+version: '3.8' # Use Docker Compose file format version 3.8
+services:
+  rabbitmq: # Service for RabbitMQ message broker
+    image: rabbitmq:3-management # Use the official RabbitMQ image with management UI
+    container_name: rabbitmq # Name the container for easier reference
+    ports:
+      - "5672:5672"   # Expose RabbitMQ main port for agent communication
+      - "15672:15672" # Expose management UI port for web access
+    environment:
+      RABBITMQ_DEFAULT_USER: user # Set default RabbitMQ username
+      RABBITMQ_DEFAULT_PASS: password # Set default RabbitMQ password
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq # Persist RabbitMQ data for durability
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"] # Check RabbitMQ health with built-in command
+      interval: 10s # Run health check every 10 seconds
+      timeout: 5s # Fail health check if it takes longer than 5 seconds
+      retries: 5 # Retry health check up to 5 times before marking as unhealthy
+
+  small_model_agent: # Service for the small model agent microservice
+    build: ./small_model_agent # Build image from Dockerfile in small_model_agent directory
+    container_name: small_model_agent # Name the container
+    depends_on:
+      rabbitmq:
+        condition: service_healthy # Wait for RabbitMQ to be healthy before starting
+    environment:
+      - RABBITMQ_HOST=rabbitmq # Hostname for RabbitMQ (Docker DNS)
+      - RABBITMQ_USER=user # RabbitMQ username
+      - RABBITMQ_PASS=password # RabbitMQ password
+    volumes:
+      - ./small_model_agent:/app # Mount local code for live development
+    restart: unless-stopped # Restart container unless explicitly stopped
+
+  scoring_agent: # Service for the scoring agent microservice
+    build: ./scoring_agent # Build image from Dockerfile in scoring_agent directory
+    container_name: scoring_agent # Name the container
+    depends_on:
+      rabbitmq:
+        condition: service_healthy # Wait for RabbitMQ to be healthy before starting
+    environment:
+      - RABBITMQ_HOST=rabbitmq # Hostname for RabbitMQ (Docker DNS)
+      - RABBITMQ_USER=user # RabbitMQ username
+      - RABBITMQ_PASS=password # RabbitMQ password
+    volumes:
+      - ./scoring_agent:/app # Mount local code for live development
+    restart: unless-stopped # Restart container unless explicitly stopped
+
+  orchestrator: # Service for the orchestrator/controller microservice
+    build: ./orchestrator # Build image from Dockerfile in orchestrator directory
+    container_name: orchestrator # Name the container
+    depends_on:
+      rabbitmq:
+        condition: service_healthy # Wait for RabbitMQ to be healthy before starting
+    environment:
+      - RABBITMQ_HOST=rabbitmq # Hostname for RabbitMQ (Docker DNS)
+      - RABBITMQ_USER=user # RabbitMQ username
+      - RABBITMQ_PASS=password # RabbitMQ password
+    volumes:
+      - ./orchestrator:/app # Mount local code for live development
+    restart: unless-stopped # Restart container unless explicitly stopped
+
+volumes:
+  rabbitmq_data: # Named volume for persisting RabbitMQ data
