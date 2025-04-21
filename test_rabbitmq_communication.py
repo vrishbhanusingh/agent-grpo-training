@@ -114,6 +114,7 @@ def publish_task_message(task_id: str, input_text: str) -> None:
 def consume_message(queue: str, filter_task_id: str, timeout: int = 30) -> Optional[Dict[str, Any]]:
     """
     Consume a message from a queue, filtering by task_id, using a blocking consumer.
+    Prints all messages seen for debugging.
     Args:
         queue: The queue name to consume from.
         filter_task_id: The task_id to filter for.
@@ -134,13 +135,13 @@ def consume_message(queue: str, filter_task_id: str, timeout: int = 30) -> Optio
             try:
                 message = json.loads(body)
                 assert isinstance(message, dict), "Message is not a dict"
-                print_verbose(f"Blocking consume from {queue}: {message}")
+                print_verbose(f"[DEBUG] Saw message in {queue}: {message}")
                 if message.get("task_id") == filter_task_id:
                     result = message
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     channel.stop_consuming()
                 else:
-                    print_verbose(f"Skipped unrelated message in {queue}: {message}")
+                    print_verbose(f"[DEBUG] Skipped unrelated message in {queue}: {message}")
                     ch.basic_ack(delivery_tag=method.delivery_tag)
             except Exception as e:
                 print(f"[Copilot][ERROR] Error decoding message from {queue}: {e}")
