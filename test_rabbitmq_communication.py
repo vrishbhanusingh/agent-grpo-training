@@ -23,13 +23,33 @@ import uuid
 from typing import Any, Dict, Optional
 import pika
 import sys
+import os  # Ensure os is imported at the top for environment variable access
 
-# Constants for queue names
-TASK_QUEUE: str = 'TaskQ'
-RESPONSE_QUEUE: str = 'ResponseQ'
-REWARD_QUEUE: str = 'RewardQ'
-RABBITMQ_HOST: str = 'localhost'
-RABBITMQ_PORT: int = 5672
+"""
+Determine the appropriate RabbitMQ host based on environment.
+- If RABBITMQ_HOST is set, use it.
+- If running inside Docker (/.dockerenv exists), use 'rabbitmq'.
+- Otherwise, default to 'localhost'.
+"""
+def get_rabbitmq_host() -> str:
+    # Priority: explicit env var > Docker > localhost
+    env_host = os.getenv('RABBITMQ_HOST')
+    if env_host:
+        return env_host
+    if os.path.exists('/.dockerenv'):
+        return 'rabbitmq'
+    return 'localhost'
+
+# Use the new function to set RABBITMQ_HOST
+RABBITMQ_HOST: str = get_rabbitmq_host()
+RABBITMQ_PORT: int = int(os.getenv('RABBITMQ_PORT', '5672'))
+RABBITMQ_USER: str = os.getenv('RABBITMQ_USER', 'user')
+RABBITMQ_PASS: str = os.getenv('RABBITMQ_PASS', 'password')
+
+# Use the correct queue names as in the main services
+TASK_QUEUE: str = 'task_queue'
+RESPONSE_QUEUE: str = 'response_queue'
+REWARD_QUEUE: str = 'reward_queue'
 
 
 def print_verbose(msg: str) -> None:
@@ -39,6 +59,19 @@ def print_verbose(msg: str) -> None:
         msg: The message to print.
     """
     print(f"[Copilot][DEBUG] {msg}")
+
+
+def get_connection() -> pika.BlockingConnection:
+    """
+    Establish a connection to RabbitMQ using credentials from environment.
+    Returns:
+        pika.BlockingConnection: The connection object.
+    Raises:
+        pika.exceptions.AMQPConnectionError: If connection fails.
+    """
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+    params = pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT, credentials=credentials)
+    return pika.BlockingConnection(params)
 
 
 def publish_task_message(task_id: str, input_text: str) -> None:
@@ -59,7 +92,7 @@ def publish_task_message(task_id: str, input_text: str) -> None:
         }
     }
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT))
+        connection = get_connection()
         channel = connection.channel()
         channel.queue_declare(queue=TASK_QUEUE, durable=True)
         channel.basic_publish(
@@ -78,9 +111,9 @@ def publish_task_message(task_id: str, input_text: str) -> None:
         sys.exit(1)
 
 
-def consume_message(queue: str, filter_task_id: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+def consume_message(queue: str, filter_task_id: str, timeout: int = 30) -> Optional[Dict[str, Any]]:
     """
-    Consume a message from a queue, filtering by task_id.
+    Consume a message from a queue, filtering by task_id, using a blocking consumer.
     Args:
         queue: The queue name to consume from.
         filter_task_id: The task_id to filter for.
@@ -90,30 +123,35 @@ def consume_message(queue: str, filter_task_id: str, timeout: int = 10) -> Optio
     Raises:
         pika.exceptions.AMQPError: If connection fails.
     """
+    result: Optional[Dict[str, Any]] = None
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT))
+        connection = get_connection()
         channel = connection.channel()
         channel.queue_declare(queue=queue, durable=True)
-        method_frame, header_frame, body = None, None, None
         start_time = time.time()
-        while time.time() - start_time < timeout:
-            method_frame, header_frame, body = channel.basic_get(queue=queue, auto_ack=True)
-            if method_frame:
-                try:
-                    message = json.loads(body)
-                    assert isinstance(message, dict), "Message is not a dict"
-                    if message.get("task_id") == filter_task_id:
-                        print_verbose(f"Received from {queue}: {message}")
-                        connection.close()
-                        return message
-                    else:
-                        print_verbose(f"Skipped unrelated message in {queue}: {message}")
-                except Exception as e:
-                    print(f"[Copilot][ERROR] Error decoding message from {queue}: {e}")
-            time.sleep(1)
-        print(f"[Copilot][WARN] No message received from {queue} for task_id {filter_task_id} within timeout.")
+        def callback(ch, method, properties, body):
+            nonlocal result
+            try:
+                message = json.loads(body)
+                assert isinstance(message, dict), "Message is not a dict"
+                print_verbose(f"Blocking consume from {queue}: {message}")
+                if message.get("task_id") == filter_task_id:
+                    result = message
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    channel.stop_consuming()
+                else:
+                    print_verbose(f"Skipped unrelated message in {queue}: {message}")
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+            except Exception as e:
+                print(f"[Copilot][ERROR] Error decoding message from {queue}: {e}")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+        channel.basic_consume(queue=queue, on_message_callback=callback, auto_ack=False)
+        while result is None and (time.time() - start_time < timeout):
+            channel.connection.process_data_events(time_limit=1)
+        if result is None:
+            print(f"[Copilot][WARN] No message received from {queue} for task_id {filter_task_id} within timeout.")
         connection.close()
-        return None
+        return result
     except pika.exceptions.AMQPConnectionError as e:
         print(f"[Copilot][ERROR] Could not connect to RabbitMQ: {e}")
         sys.exit(1)

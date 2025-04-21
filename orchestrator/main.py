@@ -8,7 +8,8 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict
+import uuid
+from typing import Any, Dict, NoReturn
 import pika
 
 TASK_QUEUE = 'task_queue'
@@ -81,13 +82,52 @@ def send_task_and_get_result(task_input: str, timeout: float = 10.0) -> None:
     connection.close()
 
 
+def persistent_task_sender() -> NoReturn:
+    """
+    Continuously sends a dummy task message to the small model agent every 10 seconds.
+    Handles connection errors and retries indefinitely.
+    Each message includes a unique task_id and ISO timestamp.
+    Raises:
+        Never returns; logs and recovers from all exceptions.
+    Usage:
+        Called as the main entrypoint for persistent orchestrator mode.
+    """
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+    while True:
+        try:
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+            channel = connection.channel()
+            channel.queue_declare(queue=TASK_QUEUE, durable=True)
+            while True:
+                task_id = str(uuid.uuid4())
+                task_msg = {
+                    "task_id": task_id,
+                    "input": "Dummy message from orchestrator",
+                    "metadata": {"timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'), "source": "persistent_orchestrator"}
+                }
+                channel.basic_publish(
+                    exchange='', routing_key=TASK_QUEUE, body=json.dumps(task_msg),
+                    properties=pika.BasicProperties(delivery_mode=2)
+                )
+                print(f"[Orchestrator] Sent dummy task: {task_msg}")
+                assert isinstance(task_msg["task_id"], str) and task_msg["task_id"], "task_id must be a non-empty string"
+                time.sleep(10)
+        except pika.exceptions.AMQPConnectionError as e:
+            print(f"[Orchestrator][ERROR] RabbitMQ connection error: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[Orchestrator][ERROR] Unexpected error: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
+
+
 def main() -> None:
     """
-    CLI entry point for orchestrator testing.
+    CLI entry point for orchestrator testing or persistent mode.
     """
     parser = argparse.ArgumentParser(description="Orchestrator CLI for agentic workflow test.")
     parser.add_argument('--test', action='store_true', help='Send a test task and print results')
     parser.add_argument('--input', type=str, default='What is the capital of France?', help='Task input string')
+    parser.add_argument('--persistent', action='store_true', help='Run orchestrator in persistent mode (send dummy tasks every 10s)')
     args = parser.parse_args()
     if args.test:
         try:
@@ -95,8 +135,11 @@ def main() -> None:
         except Exception as e:
             print(f"[Orchestrator] Error: {e}", file=sys.stderr)
             sys.exit(1)
+    elif args.persistent:
+        persistent_task_sender()
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

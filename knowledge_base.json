@@ -334,6 +334,97 @@
         "Use a language-agnostic .gitignore template."
       ],
       "final_decision_rationale": "A comprehensive .gitignore was chosen to cover all relevant development artifacts for this multi-component project, following user and Copilot guidelines."
+    },
+    {
+      "@type": "agentic:Section",
+      "name": "[CODE-GENERATION] Poetry & Dockerfile Refactor",
+      "content": "2025-04-21T00:00:00Z | Refactored orchestrator, small_model_agent, and scoring_agent to use Poetry for dependency management and reproducible Docker builds.\nReasoning: Poetry is the modern standard for Python dependency management, supporting isolated, reproducible environments and seamless Docker integration.\nAlternatives: pip, pipenv, uv. Poetry chosen for maturity and ecosystem support.\nDecision: Added pyproject.toml to each service, updated Dockerfiles to use Poetry.\nVulnerability: Detected high vulnerability in python:3.10-slim base image; will address by switching to a more secure image in the next step."
+    },
+    {
+      "timestamp": "2025-04-21T00:15:00Z",
+      "reasoning_path": "User requested persistent orchestrator that sends a dummy message every 10 seconds. Reviewed orchestrator/main.py and determined that a new persistent_task_sender function with robust error handling and CLI integration is needed. Considered alternatives: (a) run as a background thread, (b) use a scheduler, (c) simple infinite loop with error handling. Chose (c) for simplicity and traceability.",
+      "alternatives_considered": [
+        "Run as a background thread (adds complexity, not needed for single-task orchestrator)",
+        "Use a scheduler like APScheduler (overkill for simple periodic task)",
+        "Simple infinite loop with error handling (chosen for clarity and reliability)"
+      ],
+      "final_decision_rationale": "A simple infinite loop with error handling is the most maintainable and transparent solution for a persistent orchestrator in this context. It aligns with user requirements for traceability, error recovery, and minimalism."
+    },
+    {
+      "@type": "agentic:LogEntry",
+      "timestamp": "2025-04-21T14:35:00Z",
+      "sections": [
+        {
+          "type": "THINKING",
+          "content": "User requested the orchestrator to run persistently and send a dummy message to the small_model_agent every 10 seconds. The goal was to verify end-to-end RabbitMQ message passing. Considered whether to run orchestrator manually or as a persistent service via docker-compose."
+        },
+        {
+          "type": "DECISION",
+          "content": "Update orchestrator/main.py to add a persistent_task_sender() function and a --persistent CLI flag. Update docker-compose.yml to set the orchestrator service command to run in persistent mode by default. This ensures orchestrator sends dummy messages every 10 seconds automatically."
+        },
+        {
+          "type": "CODE-GENERATION",
+          "content": "Added persistent_task_sender() to orchestrator/main.py with docstrings, type annotations, error handling, and assert statements. Updated main() to support --persistent flag. Modified docker-compose.yml to set orchestrator command to run in persistent mode. Verified message flow by checking small_model_agent logs, confirming successful message passing and responses."
+        },
+        {
+          "type": "METADATA",
+          "content": {
+            "files": ["orchestrator/main.py", "docker-compose.yml"],
+            "reasoning_path": "Persistent orchestrator mode is the most robust way to continuously test message passing. CLI/manual mode is less reliable for ongoing integration. Updating docker-compose.yml ensures orchestrator always runs as intended.",
+            "alternatives_considered": ["Manual CLI invocation", "Keep orchestrator as a test-only tool", "Implement persistent service mode (chosen)", "Use a separate test script"],
+            "final_decision_rationale": "Persistent orchestrator mode with docker-compose integration provides continuous, automated message flow for robust system testing and development."
+          }
+        }
+      ]
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-21T00:00:00Z",
+      "content": "Generated a minimal MCP server for the small model agent to enable end-to-end workflow testing. The server connects to RabbitMQ, listens for tasks, generates a simple echo response, publishes it, and logs received rewards. This follows the established design pattern and user coding instructions (docstrings, error handling, type annotations, assert statements, and environment variable configuration).\n\n## Alternatives Considered\nUsing a mock/stub agent, or a more complex rule-based agent. Chose echo agent for simplicity and clarity in initial tests.\n\n## Final Decision Rationale\nAn echo-based minimal MCP server is sufficient for validating the agentic workflow and message passing, and can be easily extended later.\n\n## File\nsmall_model_agent/main.py"
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-21T00:00:00Z",
+      "content": "Generated a minimal MCP server for the scoring agent. This agent listens for responses on RabbitMQ, generates a mock reward, and sends it to the reward queue. The code includes connection retry logic, robust error handling, and follows the established design pattern for agentic workflow testing.\n\n## Alternatives Considered\nUsing a more complex scoring logic or a stub. Chose a mock score for simplicity and to validate message flow.\n\n## Final Decision Rationale\nA mock scoring agent is sufficient for validating the workflow and can be extended later for real evaluation logic.\n\n## File\nscoring_agent/main.py"
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-21T15:00:00Z",
+      "content": "Fixed RabbitMQ authentication for small_model_agent by updating main.py to use RABBITMQ_USER and RABBITMQ_PASS environment variables. This resolves the ACCESS_REFUSED error and allows the agent to connect and participate in message passing.\n\nReasoning path: Observed authentication errors in container logs. Compared environment and code. Determined credentials were missing in pika connection.\nAlternatives considered: Hardcoding credentials (rejected for security), using default guest/guest (rejected, not allowed by broker), reading from environment (chosen for flexibility and security).\nFinal decision rationale: Reading credentials from environment matches docker-compose.yml, is secure, and is the standard pattern for containerized microservices.\n\nTested by restarting the container and confirming in logs that the agent connects, processes tasks, and receives rewards as expected."
+    },
+    {
+      "@type": "agentic:ThinkingLog",
+      "timestamp": "2025-04-21T15:20:00Z",
+      "content": "Test script is not receiving response/reward messages despite agents processing the test task. Agents and test script use same queue names and credentials. Suspect issue with message consumption, queue state, or virtual host. Next step: inspect RabbitMQ management UI for queue contents, message flow, and confirm virtual host. Will also check for message encoding or declaration mismatches."
+    },
+    {
+      "@type": "agentic:ImplementationStep",
+      "timestamp": "2025-04-21T00:00:00Z",
+      "section": "Automated RabbitMQ Host Detection in Test Script",
+      "thinking": "To ensure the test script works seamlessly both locally and inside Docker, the script should automatically determine the correct RabbitMQ host. This avoids manual configuration and reduces errors when switching environments.",
+      "alternatives": [
+        "Require manual setting of RABBITMQ_HOST for each environment.",
+        "Use a configuration file to specify environment-specific settings.",
+        "Auto-detect Docker environment and set host accordingly (chosen)."
+      ],
+      "decision": "Implemented a function that checks for the RABBITMQ_HOST environment variable, then checks for the /.dockerenv file (indicating a Docker container), and defaults to 'localhost' otherwise. This provides robust, automated host selection for RabbitMQ connectivity.",
+      "codeGeneration": "Added get_rabbitmq_host() to test_rabbitmq_communication.py and replaced static RABBITMQ_HOST assignment. Also fixed missing import for os module.",
+      "metadata": {
+        "author": "Copilot",
+        "files": ["test_rabbitmq_communication.py"],
+        "related": "docker-compose.yml, RabbitMQ connectivity"
+      }
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-21T15:40:00Z",
+      "reasoning_path": "User's test script was not receiving a response due to orchestrator's persistent dummy messages filling the task queue. Investigated small_model_agent and orchestrator code, confirmed correct task_id handling, and identified queue contention as the root cause.",
+      "alternatives_considered": [
+        "Leave orchestrator running during tests (unreliable test isolation)",
+        "Stop orchestrator and clear queue for isolated test (chosen)",
+        "Implement a dedicated test queue (overkill for current needs)"
+      ],
+      "final_decision_rationale": "Stopping the orchestrator and clearing the task queue before running the test script ensures the test message is processed promptly and reliably. This provides a clean, isolated environment for end-to-end workflow verification."
     }
   ]
 }

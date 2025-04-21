@@ -58,6 +58,7 @@ services:
     volumes:
       - ./orchestrator:/app # Mount local code for live development
     restart: unless-stopped # Restart container unless explicitly stopped
+    command: ["poetry", "run", "python", "main.py", "--persistent"]
 
 volumes:
   rabbitmq_data: # Named volume for persisting RabbitMQ data
