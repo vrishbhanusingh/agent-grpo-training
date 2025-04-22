@@ -114,7 +114,7 @@ def publish_task_message(task_id: str, input_text: str) -> None:
 def consume_message(queue: str, filter_task_id: str, timeout: int = 30) -> Optional[Dict[str, Any]]:
     """
     Consume a message from a queue, filtering by task_id, using a blocking consumer.
-    Prints all messages seen for debugging.
+    Logs all messages seen for debugging.
     Args:
         queue: The queue name to consume from.
         filter_task_id: The task_id to filter for.
@@ -130,6 +130,7 @@ def consume_message(queue: str, filter_task_id: str, timeout: int = 30) -> Optio
         channel = connection.channel()
         channel.queue_declare(queue=queue, durable=True)
         start_time = time.time()
+
         def callback(ch, method, properties, body):
             nonlocal result
             try:
@@ -146,6 +147,7 @@ def consume_message(queue: str, filter_task_id: str, timeout: int = 30) -> Optio
             except Exception as e:
                 print(f"[Copilot][ERROR] Error decoding message from {queue}: {e}")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
+
         channel.basic_consume(queue=queue, on_message_callback=callback, auto_ack=False)
         while result is None and (time.time() - start_time < timeout):
             channel.connection.process_data_events(time_limit=1)
