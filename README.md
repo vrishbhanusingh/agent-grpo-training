@@ -53,10 +53,19 @@ docker-compose up --build
 - `logs/`: Persistent logging directory
 
 ### Running Tests
+
+**Important:** To ensure that orchestrator logs are written correctly and test results are not affected by the persistent orchestrator, always run tests using the provided isolation script. This will:
+- Stop the persistent orchestrator service
+- Clear RabbitMQ queues
+- Run the test script (which will log events to logs/agent_interactions.jsonl)
+- Restart the orchestrator after the test
+
+To run an isolated end-to-end test:
 ```bash
-# Run RabbitMQ communication tests
-poetry run python test_rabbitmq_communication.py
+python isolated_rabbitmq_test.py
 ```
+
+This ensures that the orchestrator in test mode can process its own messages and log all events without interference.
 
 ## Code Style and Best Practices
 - Type hints and docstrings required for all functions

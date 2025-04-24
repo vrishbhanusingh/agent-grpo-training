@@ -6,6 +6,9 @@ Includes robust connection retry and startup logging.
 import json
 import os
 import time
+import threading
+from fastapi import FastAPI, HTTPException
+import uvicorn
 from typing import Any, Dict
 import pika
 
@@ -16,6 +19,35 @@ RABBITMQ_HOST = os.environ.get('RABBITMQ_HOST', 'rabbitmq')  # Use 'rabbitmq' fo
 RABBITMQ_USER = os.environ.get('RABBITMQ_USER', 'user')
 RABBITMQ_PASS = os.environ.get('RABBITMQ_PASS', 'password')
 SCORING_AGENT_ID = 'scoring_agent_1'
+
+app = FastAPI(title="Scoring Agent MCP Server")
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    """
+    Health check endpoint for the MCP server.
+    Returns:
+        A dict indicating server health.
+    """
+    return {"status": "ok"}
+
+@app.get("/status")
+def status() -> Dict[str, Any]:
+    """
+    Status endpoint for the MCP server.
+    Returns:
+        A dict with agent status and ID.
+    """
+    return {"agent_id": SCORING_AGENT_ID, "status": "running"}
+
+@app.get("/metrics")
+def metrics() -> Dict[str, Any]:
+    """
+    Metrics endpoint for the MCP server.
+    Returns:
+        A dict with basic metrics (placeholder).
+    """
+    return {"responses_scored": 0, "rewards_sent": 0}
 
 def connect_with_retry(max_retries: int = 10, delay: float = 2.0) -> pika.BlockingConnection:
     """
@@ -67,6 +99,19 @@ def main() -> None:
         time.sleep(5)
         raise
 
+def start_rabbitmq_loop() -> None:
+    """
+    Starts the RabbitMQ consumer loop in a background thread.
+    """
+    try:
+        main()
+    except Exception as e:
+        print(f"RabbitMQ loop crashed: {e}")
+
 if __name__ == "__main__":
-    main()
+    # Start RabbitMQ consumer in a background thread
+    rabbitmq_thread = threading.Thread(target=start_rabbitmq_loop, daemon=True)
+    rabbitmq_thread.start()
+    # Start FastAPI server
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 ## End of generated code

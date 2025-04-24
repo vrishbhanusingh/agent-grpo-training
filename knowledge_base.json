@@ -425,6 +425,85 @@
         "Implement a dedicated test queue (overkill for current needs)"
       ],
       "final_decision_rationale": "Stopping the orchestrator and clearing the task queue before running the test script ensures the test message is processed promptly and reliably. This provides a clean, isolated environment for end-to-end workflow verification."
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-23T00:00:00Z",
+      "section": "[THINKING]",
+      "content": "To add MCP server functionality, FastAPI was chosen for its async support, OpenAPI docs, and containerization ease. Alternatives considered: Flask (less async support), gRPC (more complex, not needed for simple control/status APIs). Decision: FastAPI is best for composability and rapid prototyping. The RabbitMQ loop is run in a background thread to keep the HTTP server responsive. Error handling, type annotations, and docstrings are added per user instructions. Requirements and Dockerfile updated as needed."
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-23T00:01:00Z",
+      "section": "[CODE-GENERATION]",
+      "content": "Integrated FastAPI MCP server into small_model_agent/main.py, exposing /health, /status, and /metrics endpoints. RabbitMQ loop runs in a background thread. requirements.txt updated to include fastapi and uvicorn."
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-23T00:02:00Z",
+      "section": "[METADATA]",
+      "content": "pip install failed due to externally managed environment. User should install dependencies in a virtual environment or with --break-system-packages if appropriate."
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-23T00:03:00Z",
+      "section": "[CODE-GENERATION]",
+      "content": "Integrated FastAPI MCP server into scoring_agent/main.py and orchestrator/main.py, exposing /health, /status, and /metrics endpoints. RabbitMQ/CLI loop runs in a background thread. requirements.txt updated to include fastapi and uvicorn."
+    },
+    {
+      "@type": "agentic:CodeGenerationLog",
+      "timestamp": "2025-04-23T00:04:00Z",
+      "section": "[METADATA]",
+      "content": "fastapi and uvicorn imports will not resolve until dependencies are installed in the environment. User should install dependencies in a virtual environment or with --break-system-packages if appropriate."
+    },
+    {
+      "timestamp": "2025-04-24T00:00:00Z",
+      "reasoning_path": "Docker containers for all agents failed due to missing FastAPI. Poetry was used for dependency management, but FastAPI and Uvicorn were only in requirements.txt, not pyproject.toml. The Dockerfile only installs dependencies from pyproject.toml.",
+      "alternatives_considered": [
+        "Switch Dockerfiles to use requirements.txt with pip install",
+        "Add FastAPI and Uvicorn to pyproject.toml (preferred for Poetry)"
+      ],
+      "final_decision_rationale": "Adding FastAPI and Uvicorn to pyproject.toml maintains consistency with Poetry and ensures dependencies are installed in Docker images."
+    },
+    {
+      "timestamp": "2025-04-24T00:00:00Z",
+      "decision": "Add fastapi and uvicorn to [tool.poetry.dependencies] in all agent pyproject.toml files."
+    },
+    {
+      "timestamp": "2025-04-24T00:00:00Z",
+      "code_generation": "Inserted fastapi = '*' and uvicorn = '*' into [tool.poetry.dependencies] for small_model_agent, scoring_agent, and orchestrator pyproject.toml files."
+    },
+    {
+      "timestamp": "2025-04-24T00:00:00Z",
+      "files_modified": [
+        "small_model_agent/pyproject.toml",
+        "scoring_agent/pyproject.toml",
+        "orchestrator/pyproject.toml"
+      ],
+      "issue_resolved": "ModuleNotFoundError: No module named 'fastapi' in Docker containers."
+    },
+    {
+      "timestamp": "2025-04-24T00:30:00Z",
+      "reasoning_path": "User reported orchestrator container not logging. Investigation showed only console print statements, no file logging. Project requirements and architecture call for persistent, structured logs for downstream training and analysis.",
+      "alternatives_considered": [
+        "Continue with only stdout logging (not persistent, not queryable)",
+        "Add file-based JSONL logging for all orchestrator events (chosen)",
+        "Send logs to a remote logging service (overkill for current stage)"
+      ],
+      "final_decision_rationale": "File-based JSONL logging is simple, robust, and matches the project's data pipeline and traceability requirements."
+    },
+    {
+      "timestamp": "2025-04-24T00:30:00Z",
+      "decision": "Add a log_event() function to orchestrator/main.py. Log all task, response, reward, and error events to logs/agent_interactions.jsonl in both persistent and test modes."
+    },
+    {
+      "timestamp": "2025-04-24T00:30:00Z",
+      "code_generation": "Inserted log_event() and LOG_FILE in orchestrator/main.py. All major events now append structured JSONL entries to logs/agent_interactions.jsonl. Error handling and docstrings included."
+    },
+    {
+      "timestamp": "2025-04-24T00:30:00Z",
+      "files_modified": ["orchestrator/main.py"],
+      "issue_resolved": "Orchestrator now logs all key events to a persistent file for downstream analysis and training."
     }
   ]
 }

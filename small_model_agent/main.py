@@ -23,6 +23,9 @@ import json
 import time
 import logging
 import pika
+import threading
+from fastapi import FastAPI, HTTPException
+import uvicorn
 from typing import Any, Dict, Optional
 
 # Setup logging
@@ -135,6 +138,48 @@ def main() -> None:
     finally:
         connection.close()
 
+app = FastAPI(title="Small Model Agent MCP Server")
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    """
+    Health check endpoint for the MCP server.
+    Returns:
+        A dict indicating server health.
+    """
+    return {"status": "ok"}
+
+@app.get("/status")
+def status() -> Dict[str, Any]:
+    """
+    Status endpoint for the MCP server.
+    Returns:
+        A dict with agent status and ID.
+    """
+    return {"agent_id": AGENT_ID, "status": "running"}
+
+@app.get("/metrics")
+def metrics() -> Dict[str, Any]:
+    """
+    Metrics endpoint for the MCP server.
+    Returns:
+        A dict with basic metrics (placeholder).
+    """
+    return {"tasks_processed": 0, "rewards_received": 0}
+
+def start_rabbitmq_loop() -> None:
+    """
+    Starts the RabbitMQ consumer loop in a background thread.
+    """
+    try:
+        main()
+    except Exception as e:
+        logging.error(f"RabbitMQ loop crashed: {e}")
+
 if __name__ == "__main__":
-    main()
+    # Start RabbitMQ consumer in a background thread
+    rabbitmq_thread = threading.Thread(target=start_rabbitmq_loop, daemon=True)
+    rabbitmq_thread.start()
+    # Start FastAPI server
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 ## End of generated code

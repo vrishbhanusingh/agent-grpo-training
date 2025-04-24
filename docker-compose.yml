@@ -60,20 +60,20 @@ services:
     restart: unless-stopped # Restart container unless explicitly stopped
     command: ["poetry", "run", "python", "main.py", "--persistent"]
 
-  test_rabbitmq: # Service for testing RabbitMQ communication
-    build: ./orchestrator # Use the orchestrator's Dockerfile for the environment
-    container_name: test_rabbitmq # Name the container
-    depends_on:
-      rabbitmq:
-        condition: service_healthy # Wait for RabbitMQ to be healthy before starting
-    environment:
-      - RABBITMQ_HOST=rabbitmq # Hostname for RabbitMQ (Docker DNS)
-      - RABBITMQ_USER=user # RabbitMQ username
-      - RABBITMQ_PASS=password # RabbitMQ password
-    volumes:
-      - ./test_rabbitmq_communication.py:/app/test_rabbitmq_communication.py # Mount the test script
-    command: ["poetry", "run", "python", "/app/test_rabbitmq_communication.py"] # Run the test script
-    restart: "no" # Do not restart the container after it exits
+  # test_rabbitmq: # Service for testing RabbitMQ communication
+  #   build: ./orchestrator # Use the orchestrator's Dockerfile for the environment
+  #   container_name: test_rabbitmq # Name the container
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy # Wait for RabbitMQ to be healthy before starting
+  #   environment:
+  #     - RABBITMQ_HOST=rabbitmq # Hostname for RabbitMQ (Docker DNS)
+  #     - RABBITMQ_USER=user # RabbitMQ username
+  #     - RABBITMQ_PASS=password # RabbitMQ password
+  #   volumes:
+  #     - ./test_rabbitmq_communication.py:/app/test_rabbitmq_communication.py # Mount the test script
+  #   command: ["poetry", "run", "python", "/app/test_rabbitmq_communication.py"] # Run the test script
+  #   restart: "no" # Do not restart the container after it exits
 
 volumes:
   rabbitmq_data: # Named volume for persisting RabbitMQ data
