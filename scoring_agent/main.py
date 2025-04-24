@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 import uvicorn
 from typing import Any, Dict
 import pika
+import logging
 
 RESPONSE_QUEUE = 'response_queue'
 REWARD_QUEUE = 'reward_queue'
@@ -77,20 +78,29 @@ def main() -> None:
         channel.queue_declare(queue=REWARD_QUEUE, durable=True)
         print("[ScoringAgent] Waiting for responses...")
         def callback(ch, method, properties, body):
-            response = json.loads(body)
-            print(f"[ScoringAgent] Received response: {response}")
-            reward = {
-                "task_id": response["task_id"],
-                "score": 0.95,  # Mock score
-                "scoring_agent_id": SCORING_AGENT_ID,
-                "metadata": {"timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'), "criteria": "mock"}
-            }
-            channel.basic_publish(
-                exchange='', routing_key=REWARD_QUEUE, body=json.dumps(reward),
-                properties=pika.BasicProperties(delivery_mode=2)
-            )
-            print(f"[ScoringAgent] Sent reward: {reward}")
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+            """
+            Callback for response messages. Publishes reward to REWARD_QUEUE.
+            """
+            try:
+                response = json.loads(body)
+                assert "task_id" in response, "Response message missing task_id."
+                logging.info(f"[Scoring Agent] Received response: {response}")
+
+                reward = {
+                    "task_id": response["task_id"],
+                    "score": 1.0,  # Mock score for testing
+                    "metadata": {"timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')}
+                }
+                ch.basic_publish(
+                    exchange='',
+                    routing_key=REWARD_QUEUE,
+                    body=json.dumps(reward).encode('utf-8')
+                )
+                logging.info(f"[Scoring Agent] Sent reward: {reward}")
+            except Exception as e:
+                logging.error(f"[Scoring Agent][ERROR] Failed to process response: {e}")
+            finally:
+                ch.basic_ack(delivery_tag=method.delivery_tag)
         channel.basic_qos(prefetch_count=1)
         channel.basic_consume(queue=RESPONSE_QUEUE, on_message_callback=callback)
         channel.start_consuming()

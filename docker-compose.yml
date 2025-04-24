@@ -56,7 +56,7 @@ services:
       - RABBITMQ_USER=user # RabbitMQ username
       - RABBITMQ_PASS=password # RabbitMQ password
     volumes:
-      - ./orchestrator:/app # Mount local code for live development
+      - ./:/app  # Mount the entire workspace into /app in the container
     restart: unless-stopped # Restart container unless explicitly stopped
     command: ["poetry", "run", "python", "main.py", "--persistent"]
 

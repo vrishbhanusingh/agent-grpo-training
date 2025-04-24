@@ -155,113 +155,85 @@ def send_task_and_get_result(task_input: str, timeout: float = 10.0) -> None:
     connection.close()
 
 
+def on_response_message(ch, method, properties, body):
+    """
+    Callback for processing messages from the RESPONSE_QUEUE.
+    Args:
+        ch: The channel object.
+        method: Delivery method.
+        properties: Message properties.
+        body: The message body.
+    """
+    try:
+        msg = json.loads(body)
+        print(f"[Orchestrator] Received response: {msg}")
+        log_event({
+            "event": "response_received",
+            "task_id": msg.get("task_id"),
+            "response": msg.get("response", str(msg)),
+            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "source": "persistent_orchestrator",
+            "metadata": msg.get("metadata", {})
+        })
+    except Exception as e:
+        print(f"[Orchestrator][ERROR] Failed to process response: {e}")
+    finally:
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+
+def on_reward_message(ch, method, properties, body):
+    """
+    Callback for processing messages from the REWARD_QUEUE.
+    Args:
+        ch: The channel object.
+        method: Delivery method.
+        properties: Message properties.
+        body: The message body.
+    """
+    try:
+        msg = json.loads(body)
+        print(f"[Orchestrator] Received reward: {msg}")
+        log_event({
+            "event": "reward_received",
+            "task_id": msg.get("task_id"),
+            "reward": msg.get("score", msg),
+            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "source": "persistent_orchestrator",
+            "metadata": msg.get("metadata", {})
+        })
+    except Exception as e:
+        print(f"[Orchestrator][ERROR] Failed to process reward: {e}")
+    finally:
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+
 def persistent_task_sender() -> NoReturn:
     """
     Continuously sends a dummy task message to the small model agent every 10 seconds.
-    Also consumes and prints any messages from RESPONSE_QUEUE and REWARD_QUEUE.
-    Handles connection errors and retries indefinitely.
-    Each message includes a unique task_id and ISO timestamp.
-    Raises:
-        Never returns; logs and recovers from all exceptions.
-    Usage:
-        Called as the main entrypoint for persistent orchestrator mode.
+    Also consumes messages from RESPONSE_QUEUE and REWARD_QUEUE.
     """
-    credentials: pika.PlainCredentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
     while True:
         try:
-            connection: pika.BlockingConnection = pika.BlockingConnection(
+            connection = pika.BlockingConnection(
                 pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
             )
             channel = connection.channel()
             channel.queue_declare(queue=TASK_QUEUE, durable=True)
             channel.queue_declare(queue=RESPONSE_QUEUE, durable=True)
             channel.queue_declare(queue=REWARD_QUEUE, durable=True)
-            last_task_time: float = 0.0
-            while True:
-                now: float = time.time()
-                # Send a new task every 10 seconds
-                if now - last_task_time >= 10.0:
-                    task_id: str = str(uuid.uuid4())
-                    task_msg: dict[str, object] = {
-                        "task_id": task_id,
-                        "input": "Dummy message from orchestrator",
-                        "metadata": {"timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'), "source": "persistent_orchestrator"}
-                    }
-                    channel.basic_publish(
-                        exchange='', routing_key=TASK_QUEUE, body=json.dumps(task_msg),
-                        properties=pika.BasicProperties(delivery_mode=2)
-                    )
-                    print(f"[Orchestrator] Sent dummy task: {task_msg}")
-                    log_event({
-                        "event": "task_sent",
-                        "task_id": task_id,
-                        "input": task_msg["input"],
-                        "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                        "source": "persistent_orchestrator",
-                        "metadata": task_msg.get("metadata", {})
-                    })
-                    assert isinstance(task_msg["task_id"], str) and task_msg["task_id"], "task_id must be a non-empty string"
-                    last_task_time = now
-                # Non-blocking consume from RESPONSE_QUEUE
-                method, props, body = channel.basic_get(RESPONSE_QUEUE, auto_ack=True)
-                if body:
-                    try:
-                        msg = json.loads(body)
-                        log_event({
-                            "event": "response_received",
-                            "task_id": msg.get("task_id"),
-                            "response": msg.get("response", str(msg)),
-                            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                            "source": "persistent_orchestrator",
-                            "metadata": msg.get("metadata", {})
-                        })
-                    except Exception as e:
-                        log_event({
-                            "event": "error",
-                            "type": "decode_response",
-                            "error": str(e),
-                            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                            "source": "persistent_orchestrator"
-                        })
-                # Non-blocking consume from REWARD_QUEUE
-                method, props, body = channel.basic_get(REWARD_QUEUE, auto_ack=True)
-                if body:
-                    try:
-                        msg = json.loads(body)
-                        log_event({
-                            "event": "reward_received",
-                            "task_id": msg.get("task_id"),
-                            "reward": msg.get("score", msg),
-                            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                            "source": "persistent_orchestrator",
-                            "metadata": msg.get("metadata", {})
-                        })
-                    except Exception as e:
-                        log_event({
-                            "event": "error",
-                            "type": "decode_reward",
-                            "error": str(e),
-                            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                            "source": "persistent_orchestrator"
-                        })
-                time.sleep(0.5)
+
+            # Start consuming messages
+            channel.basic_consume(queue=RESPONSE_QUEUE, on_message_callback=on_response_message)
+            channel.basic_consume(queue=REWARD_QUEUE, on_message_callback=on_reward_message)
+
+            print("[Orchestrator] Waiting for messages...")
+            channel.start_consuming()
         except pika.exceptions.AMQPConnectionError as e:
             print(f"[Orchestrator][ERROR] RabbitMQ connection error: {e}. Retrying in 5 seconds...")
-            log_event({
-                "event": "error",
-                "type": "rabbitmq_connection",
-                "error": str(e),
-                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')
-            })
             time.sleep(5)
         except Exception as e:
             print(f"[Orchestrator][ERROR] Unexpected error: {e}. Retrying in 5 seconds...")
-            log_event({
-                "event": "error",
-                "type": "unexpected",
-                "error": str(e),
-                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')
-            })
             time.sleep(5)
 
 
@@ -269,67 +241,21 @@ def main() -> None:
     """
     CLI entry point for orchestrator testing or persistent mode.
     """
-    parser = argparse.ArgumentParser(description="Orchestrator CLI for agentic workflow test.")
-    parser.add_argument('--test', action='store_true', help='Send a test task and print results')
-    parser.add_argument('--input', type=str, default='What is the capital of France?', help='Task input string')
-    parser.add_argument('--persistent', action='store_true', help='Run orchestrator in persistent mode (send dummy tasks every 10s)')
+    parser = argparse.ArgumentParser(description="Orchestrator CLI")
+    parser.add_argument(
+        "--persistent",
+        action="store_true",
+        help="Run the orchestrator in persistent mode (sends dummy tasks every 10 seconds)."
+    )
     args = parser.parse_args()
-    if args.test:
-        try:
-            send_task_and_get_result(args.input)
-        except Exception as e:
-            print(f"[Orchestrator] Error: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif args.persistent:
+
+    if args.persistent:
+        print("[Orchestrator] Running in persistent mode.")
         persistent_task_sender()
     else:
-        parser.print_help()
-
-
-app = FastAPI(title="Orchestrator MCP Server")
-
-@app.get("/health")
-def health() -> Dict[str, str]:
-    """
-    Health check endpoint for the MCP server.
-    Returns:
-        A dict indicating server health.
-    """
-    return {"status": "ok"}
-
-@app.get("/status")
-def status() -> Dict[str, Any]:
-    """
-    Status endpoint for the MCP server.
-    Returns:
-        A dict with orchestrator status.
-    """
-    return {"status": "running"}
-
-@app.get("/metrics")
-def metrics() -> Dict[str, Any]:
-    """
-    Metrics endpoint for the MCP server.
-    Returns:
-        A dict with basic metrics (placeholder).
-    """
-    return {"tasks_sent": 0, "responses_received": 0, "rewards_received": 0}
-
-
-def start_orchestrator_cli() -> None:
-    """
-    Starts the orchestrator CLI in a background thread.
-    """
-    try:
-        main()
-    except Exception as e:
-        print(f"Orchestrator CLI crashed: {e}")
+        print("[Orchestrator] Running in CLI mode.")
+        # Add CLI-specific logic here if needed
 
 
 if __name__ == "__main__":
-    # Start orchestrator CLI in a background thread
-    orchestrator_thread = threading.Thread(target=start_orchestrator_cli, daemon=True)
-    orchestrator_thread.start()
-    # Start FastAPI server
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-## End of generated code
+    main()

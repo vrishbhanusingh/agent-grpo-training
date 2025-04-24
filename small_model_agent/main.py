@@ -89,15 +89,23 @@ def on_task_message(ch, method, properties, body):
     Callback for task messages. Publishes response to RESPONSE_QUEUE.
     """
     try:
-        response = process_task_message(body)
+        task = json.loads(body)
+        assert "task_id" in task, "Task message missing task_id."
+        logging.info(f"[Small Model Agent] Received task: {task}")
+
+        response = {
+            "task_id": task["task_id"],
+            "response": f"Processed: {task['input']}",
+            "metadata": {"timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')}
+        }
         ch.basic_publish(
             exchange='',
             routing_key=RESPONSE_QUEUE,
             body=json.dumps(response).encode('utf-8')
         )
-        logging.info(f"Processed task {response['task_id']} and sent response.")
+        logging.info(f"[Small Model Agent] Sent response: {response}")
     except Exception as e:
-        logging.error(f"Failed to process task message: {e}")
+        logging.error(f"[Small Model Agent][ERROR] Failed to process task: {e}")
     finally:
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -107,10 +115,10 @@ def on_reward_message(ch, method, properties, body):
     """
     try:
         reward = json.loads(body)
-        assert "task_id" in reward and "score" in reward, "Invalid reward message format."
-        logging.info(f"Received reward for task {reward['task_id']}: {reward['score']}")
+        assert "task_id" in reward, "Reward message missing task_id."
+        logging.info(f"[Small Model Agent] Received reward: {reward}")
     except Exception as e:
-        logging.error(f"Error processing reward message: {e}")
+        logging.error(f"[Small Model Agent][ERROR] Failed to process reward: {e}")
     finally:
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
